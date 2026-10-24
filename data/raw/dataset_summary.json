@@ -1,0 +1,91 @@
+{
+  "dataset_version": "1.0",
+  "generation_timestamp": "2026-10-24T20:05:01.429504Z",
+  "elapsed_wall_seconds": 398.43,
+  "total_readings": 2110913,
+  "total_shipments": 2998,
+  "total_devices": 50,
+  "date_range": [
+    "2026-05-01T00:00:00Z",
+    "2026-05-30T23:59:00Z"
+  ],
+  "cargo_distribution": {
+    "VACCINE": 644905,
+    "DAIRY": 641709,
+    "FROZEN_FOOD": 523281,
+    "FRESH_PRODUCE": 301018
+  },
+  "temperature_stats_per_cargo": {
+    "VACCINE": {
+      "safe_range": [
+        2.0,
+        8.0
+      ],
+      "setpoint": 5.0,
+      "mean": 5.07,
+      "std": 0.69,
+      "p05": 4.38,
+      "p50": 5.01,
+      "p95": 5.76
+    },
+    "FROZEN_FOOD": {
+      "safe_range": [
+        -25.0,
+        -18.0
+      ],
+      "setpoint": -21.0,
+      "mean": -20.94,
+      "std": 0.66,
+      "p05": -21.62,
+      "p50": -21.0,
+      "p95": -20.25
+    },
+    "DAIRY": {
+      "safe_range": [
+        1.0,
+        4.0
+      ],
+      "setpoint": 2.5,
+      "mean": 2.54,
+      "std": 0.61,
+      "p05": 1.87,
+      "p50": 2.5,
+      "p95": 3.21
+    },
+    "FRESH_PRODUCE": {
+      "safe_range": [
+        4.0,
+        10.0
+      ],
+      "setpoint": 7.0,
+      "mean": 7.03,
+      "std": 0.61,
+      "p05": 6.36,
+      "p50": 6.99,
+      "p95": 7.71
+    }
+  },
+  "excursion_stats": {
+    "pct_readings_out_of_range": 1.575,
+    "positive_30min_lookahead_window_pct": 3.7,
+    "total_ground_truth_events": 5549,
+    "excursion_causing_events": 619,
+    "root_cause_breakdown": {
+      "insufficient_precool": 265,
+      "compressor_failure": 141,
+      "door_left_open": 131,
+      "long_stop_hot_ambient": 78,
+      "compressor_degradation": 4
+    }
+  },
+  "fault_stats": {
+    "missing_rate_configured": 0.015,
+    "late_rate_configured": 0.01,
+    "duplicate_rate_configured": 0.005
+  },
+  "sanity_checks": {
+    "no_nans": true,
+    "physical_bounds_valid": true,
+    "positive_window_ratio_acceptable": true
+  }
+}
