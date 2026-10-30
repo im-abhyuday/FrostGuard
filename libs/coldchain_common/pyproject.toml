@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coldchain_common"
+version = "0.1.0"
+description = "Shared schemas, enums, and database models for ColdChainIQ"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0.0",
+    "sqlalchemy>=2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

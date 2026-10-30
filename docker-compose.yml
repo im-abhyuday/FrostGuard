@@ -6,8 +6,47 @@ networks:
 
 volumes:
   redpanda-data:
+  postgres-data:
+  redis-data:
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: coldchain-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-coldchainiq}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - coldchain-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d coldchainiq"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: coldchain-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - coldchain-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v24.1.8
     container_name: coldchain-redpanda
@@ -52,6 +91,56 @@ services:
     depends_on:
       - redpanda
 
+  migrate:
+    build:
+      context: .
+      dockerfile: services/consumer/Dockerfile
+    container_name: coldchain-migrate
+    working_dir: /app/services/api
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      - POSTGRES_DSN=postgresql+psycopg://postgres:postgres@postgres:5432/coldchainiq
+    networks:
+      - coldchain-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  consumer:
+    build:
+      context: .
+      dockerfile: services/consumer/Dockerfile
+    container_name: coldchain-consumer
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - KAFKA_BOOTSTRAP=redpanda:29092
+      - KAFKA_TOPIC=sensor.readings
+      - KAFKA_DLQ_TOPIC=sensor.dlq
+      - KAFKA_GROUP_ID=coldchain-ingest
+      - BATCH_SIZE=500
+      - BATCH_MAX_WAIT_MS=1000
+      - REDIS_URL=redis://redis:6379/0
+      - POSTGRES_DSN=postgresql+psycopg://postgres:postgres@postgres:5432/coldchainiq
+      - WINDOW_MINUTES=60
+      - LATEST_TTL_SECONDS=86400
+      - DEDUPE_TTL_SECONDS=7200
+      - MAX_RETRIES=5
+      - HEALTH_PORT=8081
+      - LOG_LEVEL=INFO
+    networks:
+      - coldchain-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
   simulator:
     profiles: ["sim"]
     build:
@@ -63,7 +152,7 @@ services:
       - SIM_KAFKA_TOPIC=sensor.readings
       - SIM_TRUCKS=10
       - SIM_TIME_SCALE=60.0
-      - SIM_BAD_EVENT_RATE=0.002
+      - SIM_BAD_EVENT_RATE=0.02
       - SIM_EXCURSION_PROB=0.05
       - SIM_INTERVAL_SEC=60
     networks:

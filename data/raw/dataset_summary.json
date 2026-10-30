@@ -1,7 +1,7 @@
 {
   "dataset_version": "1.0",
-  "generation_timestamp": "2026-10-24T20:05:01.429504Z",
-  "elapsed_wall_seconds": 398.43,
+  "generation_timestamp": "2026-10-30T12:35:23.966074Z",
+  "elapsed_wall_seconds": 186.49,
   "total_readings": 2110913,
   "total_shipments": 2998,
   "total_devices": 50,
