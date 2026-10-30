@@ -65,7 +65,15 @@ flowchart LR
    - **60-Minute Rolling Feature Window**: ZSET `device:{device_id}:window` indexed by event epoch seconds and trimmed automatically for Phase 5 real-time ML feature inference.
    - **Dead-Letter Queue (DLQ)**: Validates messages via Pydantic + physical domain bounds; sends corrupted payloads with diagnostic error metadata to `sensor.dlq`.
 
-4. **100% Deterministic Reproducibility**:
+4. **Authentication, JWT & Role-Based Access Control (Phase 3)**:
+   - **Argon2id Password Security**: Modern memory-hard password hashing with automatic transparent rehashing on parameter evolution.
+   - **OAuth2 & JWT Architecture**: Compliant with OAuth2 password request form for native Swagger UI Authorize workflows; 15-minute access tokens with `HS256` signature verification.
+   - **Refresh Token Rotation & Theft Detection**: 7-day single-use opaque tokens with lineage tracking (`family_id`). Replay of revoked tokens immediately terminates the family and invalidates active JWTs via Redis.
+   - **Three-Tier Permission Matrix (RBAC)**: Strict role separation between `driver` (assigned shipments only), `manager` (fleet-wide write/admin), and `auditor` (fleet-wide read-only).
+   - **IDOR Defense**: Returns `404 Not Found` (never `403`) for unassigned shipments, eliminating resource enumeration vulnerabilities.
+   - **Defense-in-Depth Hardening**: Redis sliding-window rate limiting (fail-open), PostgreSQL account lockout (5 failures = 15m), security headers (HSTS, CSP, XFO), request ID tracing, and log credential redaction.
+
+5. **100% Deterministic Reproducibility**:
    - Master deterministic RNG splitting via `numpy.random.SeedSequence(seed).spawn(N)` guaranteeing identical bit-for-bit telemetry across runs with identical seeds.
 
 ---
@@ -85,14 +93,26 @@ FrostGuard/
 │   └── coldchain_common/            # Shared canonical models, enums, and database schemas
 │       ├── pyproject.toml
 │       └── src/coldchain_common/
-│           ├── db_models.py         # SQLAlchemy 2.0 ORM entities (Shipment, Device, Reading, Alert)
-│           ├── enums.py             # Domain enumerations (CargoType, RootCauseTag, etc.)
+│           ├── db_models.py         # SQLAlchemy 2.0 ORM entities (User, Shipment, Reading, Alert, etc.)
+│           ├── enums.py             # Domain enumerations (UserRole, CargoType, RootCauseTag)
 │           └── models.py            # Pydantic v2 validation contracts (SensorReading, DLQ)
 ├── services/
-│   ├── api/                         # Backend API and database migrations
-│   │   ├── alembic.ini
-│   │   ├── migrations/              # Alembic migration scripts
-│   │   └── src/api/db/models.py
+│   ├── api/                         # Backend REST API, Auth & RBAC (Phase 3)
+│   │   ├── Dockerfile               # Multi-stage non-root container image with healthcheck
+│   │   ├── README.md                # Sequence diagrams, permission matrix, threat models, design decisions
+│   │   ├── requirements.txt         # Pinned production and testing dependencies
+│   │   ├── migrations/              # Alembic migration revisions (001_initial, 002_auth_and_rbac)
+│   │   ├── scripts/
+│   │   │   ├── seed_users.py        # Generates baseline manager, auditor, and assigned drivers
+│   │   │   └── verify_phase3.py     # End-to-end 11-step QA verification script
+│   │   ├── src/api/
+│   │   │   ├── core/                # Config, security (Argon2id/JWT), rate limiter, deps, errors, logging
+│   │   │   ├── db/                  # Async sessionmaker and model exports
+│   │   │   ├── repositories/        # UserRepository, TokenRepository, ShipmentRepository, AuditRepository
+│   │   │   ├── routers/             # auth, users, admin, shipments endpoints
+│   │   │   ├── schemas/             # Pydantic v2 auth and user schemas
+│   │   │   └── services/            # AuthService orchestrating token rotation and business logic
+│   │   └── tests/                   # 43 automated pytest integration and unit tests (88% coverage)
 │   ├── consumer/                    # High-throughput streaming ingestion pipeline (Phase 2)
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
@@ -121,8 +141,8 @@ FrostGuard/
 │       │   └── verify_phase1.py     # Automated Phase 1 QA verification suite
 │       ├── src/simulator/           # Core simulator engine
 │       └── tests/                   # Pytest test suite (11 unit and integration tests)
-├── docker-compose.yml               # Postgres 16, Redis 7, Redpanda, Console, Migrate, Consumer
-├── Makefile                         # Unified operations (up, migrate, consumer-up, verify, etc.)
+├── docker-compose.yml               # Postgres 16, Redis 7, Redpanda, Console, Migrate, Consumer, API
+├── Makefile                         # Unified operations (up, migrate, seed-users, verify-phase3, etc.)
 ├── .env.example
 └── README.md
 ```
@@ -193,13 +213,59 @@ python services/consumer/scripts/verify_phase2.py --all
 
 | Service | Container Port | Host Port | Protocol / Listener | Used By |
 | :--- | :--- | :--- | :--- | :--- |
+| **API Gateway / RBAC** | `8002` | `8002` | `HTTP (REST)` | Client apps, Swagger UI (`/docs`), ReDoc (`/redoc`) |
 | **Redpanda (Kafka)** | `29092` | *None* | `PLAINTEXT` (Internal) | Docker network simulator and consumer (`redpanda:29092`) |
 | **Redpanda (Kafka)** | `9092` | `9092` | `OUTSIDE` (External) | Host CLI and local producers (`localhost:9092`) |
 | **Redpanda (Admin)** | `9644` | `9645` | `HTTP / Admin API` | Cluster health / `rpk` administration |
 | **Redpanda Console** | `8080` | `8080` | `HTTP (Web UI)` | Web browser topic/message inspector (`http://localhost:8080`) |
-| **PostgreSQL 16** | `5432` | `5432` | `PostgreSQL Protocol`| Ingestion consumer persistence & API database |
-| **Redis 7** | `6379` | `6379` | `RESP Protocol` | In-memory dedupe filter, latest state, and feature window |
+| **PostgreSQL 16** | `5432` | `5433` | `PostgreSQL Protocol`| Ingestion consumer persistence & API database (`coldchainiq`) |
+| **Redis 7** | `6379` | `6380` | `RESP Protocol` | In-memory dedupe filter, latest state, and token denylist |
 | **Consumer Health** | `8081` | `8081` | `HTTP` | Container readiness probe and metrics snapshot (`/health`) |
+
+---
+
+## Security Architecture & Threat Model
+
+| Threat Vector | Attack Scenario | ColdChainIQ Mitigation | Status |
+|---|---|---|:---:|
+| **Account Enumeration on Register** | Attacker probes `/auth/register` to discover registered emails. | Returns `202 Accepted` with generic body `"If this email can be registered, the account has been created. You can now sign in."` for both new and existing emails. Runs dummy Argon2id hash on existing email to achieve <10% timing parity. Race conditions handled via PostgreSQL `uq_users_email_ci ON (lower(email))`. | **FIXED (FIX 1)** |
+| **Single Logout during Redis Outage** | User calls `/auth/logout` while Redis is down. | Revokes refresh token in PostgreSQL. Warns loudly in server logs that current access token remains valid until natural expiry (max 15m). | **Documented (FIX 5)** |
+| **Privilege Revocation during Redis Outage** | Role changed or user deactivated while Redis is down. | Access tokens carry a `tv` (token_version) claim. PostgreSQL `token_version` increments on role change, deactivation, password reset, and logout-all. `get_current_user` rejects tokens with `tv < user.token_version` even if Redis is unreachable. | **FIXED (FIX 5)** |
+| **Credential Stuffing / Brute Force** | Rapid automated password guessing on `/auth/login`. | Redis sliding window (5/min per combo, 20/min per IP) + PostgreSQL account lockout (5 failures = 15m lock). | **Enforced** |
+| **User Enumeration on Login** | Measuring response latency to deduce whether an email exists. | Generic error `"Invalid email or password"` for all failures; executes dummy Argon2id hash verification when user does not exist. | **Enforced** |
+| **IDOR Probing** | Driver probes unassigned shipment ID (`/shipments/SHP-002`). | Returns `404 Not Found` (never 403), masking existence from unauthorized drivers. | **Enforced** |
+| **Refresh Token Replay** | Attacker replays intercepted refresh token. | Lineage-based theft detection: wipes entire token family in PostgreSQL, increments DB `token_version`, and invalidates sessions. | **Enforced** |
+
+---
+
+## Token Lifecycle & Claims Architecture
+
+```text
+Access Token Claims:
+{
+  "sub":  "<UUID>",                   // User identity
+  "role": "driver"|"manager"|"auditor",// PostgreSQL native enum user_role_enum
+  "tv":   1,                          // User's token_version counter in PostgreSQL
+  "jti":  "<UUID>",                   // Unique token identifier
+  "type": "access",                   // Token type discriminant
+  "iss":  "coldchainiq-api",          // Configured issuer
+  "aud":  "coldchainiq-clients",      // Configured audience
+  "iat":  1793369000,                 // Issued at epoch seconds
+  "exp":  1793369900                  // Expiry epoch (15 minutes lifetime)
+}
+```
+
+### Revocation Priority Matrix
+1. **Single-Device Logout (Fast Path)**: Adds `jti` to Redis denylist with TTL equal to remaining lifetime (`denylist:{jti}`). If Redis is down, refresh token is revoked in PostgreSQL and a loud warning is emitted; access token remains valid for up to 15 minutes.
+2. **Account Termination / Role Modification / Logout-All (Authoritative Backstop)**: Atomically increments `users.token_version` in PostgreSQL. Since `get_current_user` loads the user record on authenticated requests, any token with `tv < user.token_version` or missing `tv` is immediately rejected with `401 TOKEN_REVOKED`—even during a complete Redis outage.
+
+---
+
+## Limitations & Operational Tradeoffs
+
+1. **Redis Outage Residual Window on Single Logout**: When Redis is down, single-device logout cannot write to the JTI denylist. The refresh token is revoked immediately in PostgreSQL, preventing renewal, but the currently held 15-minute access token will remain valid until its expiration. Full invalidation under Redis downtime requires calling `/auth/logout-all`, which increments `token_version` in PostgreSQL.
+2. **Rate Limiter Fail-Open**: In the event of a Redis outage, the sliding-window rate limiter fails open to prevent denying legitimate telemetry traffic, with PostgreSQL account lockout (`failed_login_count >= 5`) serving as the authoritative brute-force defense.
+3. **Database-Managed Enum**: Role values are strictly constrained by PostgreSQL native enum `user_role_enum ('driver', 'manager', 'auditor')`. Modifying roles requires an Alembic migration (`ALTER TYPE`).
 
 ---
 

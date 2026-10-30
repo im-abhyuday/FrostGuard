@@ -12,6 +12,7 @@ from .enums import (
     GroundTruthEventType,
     RootCauseTag,
     ShipmentStatus,
+    UserRole,
 )
 from .models import (
     CARGO_PROFILES,
@@ -24,10 +25,14 @@ from .models import (
 )
 from .db_models import (
     Alert,
+    AuditLog,
     Base,
     Device,
     Reading,
+    RefreshToken,
     Shipment,
+    ShipmentAssignment,
+    User,
 )
 
 __all__ = [
@@ -39,6 +44,7 @@ __all__ = [
     "GroundTruthEventType",
     "RootCauseTag",
     "ShipmentStatus",
+    "UserRole",
     "CARGO_PROFILES",
     "CargoProfile",
     "DeadLetterEnvelope",
@@ -47,8 +53,13 @@ __all__ = [
     "ShipmentMetadata",
     "get_cargo_profile",
     "Alert",
+    "AuditLog",
     "Base",
     "Device",
     "Reading",
+    "RefreshToken",
     "Shipment",
+    "ShipmentAssignment",
+    "User",
 ]
+

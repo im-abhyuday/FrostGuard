@@ -19,7 +19,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-coldchainiq}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -36,7 +36,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6380}:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -92,10 +92,12 @@ services:
       - redpanda
 
   migrate:
+    image: frostguard-api
     build:
       context: .
-      dockerfile: services/consumer/Dockerfile
+      dockerfile: services/api/Dockerfile
     container_name: coldchain-migrate
+    restart: "no"
     working_dir: /app/services/api
     command: ["alembic", "upgrade", "head"]
     environment:
@@ -137,6 +139,39 @@ services:
       redis:
         condition: service_healthy
       redpanda:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: coldchain-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8002}:8002"
+    environment:
+      - POSTGRES_DSN=postgresql+psycopg://postgres:postgres@postgres:5432/coldchainiq
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=${JWT_SECRET:-insecure_development_secret_key_minimum_32_bytes_long}
+      - JWT_ISSUER=${JWT_ISSUER:-coldchainiq-api}
+      - JWT_AUDIENCE=${JWT_AUDIENCE:-coldchainiq-clients}
+      - ACCESS_TOKEN_MINUTES=${ACCESS_TOKEN_MINUTES:-15}
+      - REFRESH_TOKEN_DAYS=${REFRESH_TOKEN_DAYS:-7}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:8002}
+      - ALLOW_SELF_REGISTRATION=${ALLOW_SELF_REGISTRATION:-true}
+      - REQUIRE_APPROVAL=${REQUIRE_APPROVAL:-false}
+      - LOGIN_RATE_LIMIT_PER_MIN=${LOGIN_RATE_LIMIT_PER_MIN:-5}
+      - HSTS_ENABLED=${HSTS_ENABLED:-false}
+      - PORT=8002
+      - LOG_LEVEL=INFO
+    networks:
+      - coldchain-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully

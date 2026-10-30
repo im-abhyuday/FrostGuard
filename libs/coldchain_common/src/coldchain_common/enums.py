@@ -61,3 +61,10 @@ class DeadLetterErrorType(str, Enum):
     FUTURE_TIMESTAMP = "FUTURE_TIMESTAMP"
     UNKNOWN_CARGO_TYPE = "UNKNOWN_CARGO_TYPE"
     MISSING_FIELD = "MISSING_FIELD"
+
+
+class UserRole(str, Enum):
+    DRIVER = "driver"
+    MANAGER = "manager"
+    AUDITOR = "auditor"
+
